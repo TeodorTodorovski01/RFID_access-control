@@ -5,18 +5,18 @@
 #include <WebServer.h>
 #include <time.h>
 
-/* -------- WIFI -------- /
-const char ssid = "-------------------";
-const char* password = "--------------";
+/* -------- WIFI -------- */
+const char* ssid = "ASI";
+const char* password = "ljapunov";
 
-IPAddress local_IP(0, 0, 0, 0);/* ================= change me ================= */
-IPAddress gateway(0, 0, 0, 0); /* ================= change me ================= */
+IPAddress local_IP(192, 168, 109, 99);
+IPAddress gateway(192, 168, 109, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);
 IPAddress secondaryDNS(8, 8, 4, 4);
 
-/* -------- TIME -------- /
-const char ntpServer = "pool.ntp.org";
+/* -------- TIME -------- */
+const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600;
 const int   daylightOffset_sec = 3600;
 
@@ -38,48 +38,13 @@ WebServer server(80);
 
 bool sdReady = false;
 
-/* -------- WATCHDOG -------- */
-byte initialVersion = 0;
-unsigned long lastRFIDCheck = 0;
-const unsigned long rfidCheckInterval = 5000; // 5 sekundi
-
 /* ================= TIME ================= */
-String getTimestamp() {change me
+String getTimestamp() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) return "NO_TIME";
   char buffer[30];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
   return String(buffer);
-}
-
-/* ================= ERROR LOG ================= */
-void logError(String msg) {
-  if (!sdReady) return;
-
-  File file = SD.open("/erordetekt.txt", FILE_APPEND);
-  if (file) {
-    file.print(getTimestamp());
-    file.print(" | ");
-    file.println(msg);
-    file.close();
-  }
-}
-
-void checkRFIDHealth() {
-
-  byte version = rfid.PCD_ReadRegister(rfid.VersionReg);
-
-  if (version == 0x00 || version == 0xFF) {
-    logError("SPI ERROR - VersionReg invalid");
-    delay(200);
-    ESP.restart();
-  }
-
-  if (version != initialVersion) {
-    logError("RFID VERSION MISMATCH");
-    delay(200);
-    ESP.restart();
-  }
 }
 
 /* ================= AUTH ================= */
@@ -121,7 +86,6 @@ void handleRoot() {
 
   <a href="/log">Live Log</a><br><br>
   <a href="/auth">View Authorized</a><br><br>
-  <a href="/erordetekt">Error Log</a><br><br>
 
   <h3>Add Authorized User</h3>
   <form action="/add" method="POST">
@@ -137,7 +101,7 @@ void handleRoot() {
 
   <br><br>
   <form action="/unlock" method="POST">
-    <button type="submit">Otkuci (2 sec)</button>
+    <button type="submit">Otkuci vrata (2s)</button>
   </form>
 
   </body>
@@ -147,21 +111,7 @@ void handleRoot() {
   server.send(200, "text/html", html);
 }
 
-void handleErrorLog() {
-
-  File file = SD.open("/erordetekt.txt", FILE_READ);
-  if (!file) {
-    server.send(200, "text/plain", "No error log.");
-    return;
-  }
-
-  String content = "";
-  while (file.available()) content += file.readString();
-  file.close();
-
-  server.send(200, "text/plain", content);
-}
-
+/* ----- LIVE LOG PAGE ----- */
 void handleLogPage() {
 
   String html = R"rawliteral(
@@ -190,7 +140,9 @@ void handleLogPage() {
   server.send(200, "text/html", html);
 }
 
+/* ----- RAW LOG DATA ----- */
 void handleLogData() {
+
   File file = SD.open("/logus.txt", FILE_READ);
   if (!file) {
     server.send(200, "text/plain", "No log file.");
@@ -204,6 +156,7 @@ void handleLogData() {
   server.send(200, "text/plain", content);
 }
 
+/* ----- AUTH VIEW ----- */
 void handleAuth() {
   File file = SD.open("/avtorizirani.txt", FILE_READ);
   if (!file) {
@@ -218,6 +171,7 @@ void handleAuth() {
   server.send(200, "text/plain", content);
 }
 
+/* ----- ADD USER ----- */
 void handleAdd() {
   String uid = server.arg("uid");
   String name = server.arg("name");
@@ -234,22 +188,20 @@ void handleAdd() {
   server.send(303);
 }
 
+/* ----- RESET ----- */
 void handleReset() {
   server.send(200, "text/html", "<h3>Restarting...</h3>");
   delay(1000);
   ESP.restart();
 }
 
+/* ----- UNLOCK ----- */
 void handleUnlock() {
+  server.send(200, "text/html", "<h3>Door Unlocked</h3>");
+
   digitalWrite(ACCESS_PIN, HIGH);
   delay(2000);
   digitalWrite(ACCESS_PIN, LOW);
-  server.sendHeader("Location", "/");
-  server.send(303);
-
-  // restart posle manual unlock
-  delay(200);
-  ESP.restart();
 }
 
 /* ================= WIFI ================= */
@@ -258,7 +210,14 @@ void connectWiFi() {
   WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS);
   WiFi.begin(ssid, password);
 
-  while (WiFi.status() != WL_CONNECTED) delay(500);
+  Serial.print("Connecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected");
+  Serial.println(WiFi.localIP());
 }
 
 /* ================= SETUP ================= */
@@ -274,8 +233,6 @@ void setup() {
   SPI.begin();
   rfid.PCD_Init();
 
-  initialVersion = rfid.PCD_ReadRegister(rfid.VersionReg);
-
   hspi.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 
   if (SD.begin(SD_CS, hspi, 1000000)) {
@@ -286,19 +243,12 @@ void setup() {
       f.println("aa bb cc dd\tIme Prezime");
       f.close();
     }
-
-    if (!SD.exists("/erordetekt.txt")) {
-      File f = SD.open("/erordetekt.txt", FILE_WRITE);
-      f.println("Error log initialized");
-      f.close();
-    }
   }
 
   server.on("/", handleRoot);
   server.on("/log", handleLogPage);
   server.on("/logdata", handleLogData);
   server.on("/auth", handleAuth);
-  server.on("/erordetekt", handleErrorLog);
   server.on("/add", HTTP_POST, handleAdd);
   server.on("/reset", HTTP_POST, handleReset);
   server.on("/unlock", HTTP_POST, handleUnlock);
@@ -311,14 +261,46 @@ void loop() {
 
   server.handleClient();
 
-  if (millis() - lastRFIDCheck > rfidCheckInterval) {
-    lastRFIDCheck = millis();
-    checkRFIDHealth();
-  }
-
   if (!rfid.PICC_IsNewCardPresent()) return;
   if (!rfid.PICC_ReadCardSerial()) return;
 
   String uidStr = "";
   for (byte i = 0; i < rfid.uid.size; i++) {
-    if (rfid.uid.uidByte[i] < 0x10) ui
+    if (rfid.uid.uidByte[i] < 0x10) uidStr += "0";
+    uidStr += String(rfid.uid.uidByte[i], HEX);
+    if (i < rfid.uid.size - 1) uidStr += " ";
+  }
+
+  if (sdReady) {
+
+    String fullName = checkAuthorization(uidStr);
+    String timeStamp = getTimestamp();
+
+    File logFile = SD.open("/logus.txt", FILE_APPEND);
+    if (logFile) {
+
+      logFile.print(timeStamp);
+      logFile.print(" | UID: ");
+      logFile.print(uidStr);
+
+      if (fullName != "") {
+
+        logFile.print(" | ");
+        logFile.println(fullName);
+
+        digitalWrite(ACCESS_PIN, HIGH);
+        delay(1500);
+        digitalWrite(ACCESS_PIN, LOW);
+
+      } else {
+        logFile.println(" | NOT AUTHORIZED");
+      }
+
+      logFile.close();
+    }
+  }
+
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  delay(500);
+}

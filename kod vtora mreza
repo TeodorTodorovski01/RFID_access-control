@@ -7,9 +7,9 @@
 
 /* -------- WIFI -------- */
 const char* ssid = "TP-LINK-ASi";
-const char* password = "ASIWifi@";
+const char* password = "ASI2Wifi@";
 
-IPAddress local_IP(192, 168, 0, 99);
+IPAddress local_IP(192, 168, 0, 98);
 IPAddress gateway(192,  168,   0,  1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);
